@@ -1,0 +1,167 @@
+<?php
+
+/**
+ * Implements hook_permission
+ */
+function vacancies_manage_permission() {
+	return array(
+		'manage own vacancies' => array(
+			'titel' => t('Manage own vacancies'),
+			'description' => t('Allows users use the own vacancies page'),
+		),
+		
+		'manage all vacancies' => array(
+			'titel' => t('Manage all vacancies'),
+			'description' => t('Allows users use the own vacancies page with all vacancies and see users names.'),
+		),
+ 	);
+}
+
+/**
+ * Implements hook_menu
+ */
+function vacancies_manage_menu(){
+  $items = array();
+	
+	// Test items
+	$items['vacancies_manage'] = array(
+   	  'title' => 'Vacatures beheren',
+   	  'description' => 'Eigen vacatures beheren.',
+	  'type' => MENU_NORMAL_ITEM,
+	  'page callback' => 'vacancies_manage_test_pager',
+	  'access arguments' => array('manage own vacancies'),
+	); 	 
+	
+	// needed for jQuery / ajax callback
+	$items['vacancies_manage/callback'] = array(
+	  'title' => 'vacatures beheer Callback',
+	  'type' => MENU_CALLBACK,
+	  'page callback' => '_vacancies_manage_test_pager_callback',
+	  'access arguments' => array('manage own vacancies'),
+	);
+	
+	$items['vacancies_manage/status_callback/%/%'] = array(
+        'page callback' => '_vacancies_manage_status_update_callback',
+        'page arguments' => array(2,3),
+        'access arguments' => array('manage own vacancies'), //'manage all vacancies'), //array('manage own vacancies'), //TODO make sure that user is owner of this vacancies
+        'type' => MENU_CALLBACK,
+    );
+	
+	return $items;
+}
+
+
+function vacancies_manage_test_pager() {
+	drupal_add_js(drupal_get_path('module', 'vacancies_manage') . '/jquery.url.js' );
+	drupal_add_js(drupal_get_path('module', 'vacancies_manage') . '/vacancies_manage.js' );
+	drupal_add_js('initializeTable();', 'inline');
+	
+	return ('<div id="table-container"></div>');
+}
+
+// 'private' this function should only be called by this module.
+function _vacancies_manage_status_update_callback() {
+	global $user;
+	
+	$node = node_load(arg(2));
+	
+	// TODO if user has access to edit own vacancies and is owner of this vancancy || user has edit all vacancies permissions.
+		
+	if( ( user_access('manage own vacancies') && $user->uid === $node->uid ) || user_access('manage all vacancies') ) {
+		
+		$node->status = arg(3);
+		
+		node_save($node); 
+		
+		drupal_goto("vacancies_manage");	
+	} else {
+		die('access denied :(');	
+	}
+	
+}
+
+function _vacancies_manage_test_pager_callback() {
+
+	global $user;
+	
+	header("Content-type: text/html");
+	header("Expires: Wed, 29 Jan 1975 04:15:00 GMT");
+	header("Last-Modified: " . gmdate("D, d M Y H:i:s") . " GMT");
+	header("Cache-Control: no-cache, must-revalidate");
+	header("Pragma: no-cache");
+	
+	
+	// build sortable header for HTML table
+	
+	$header = array(
+		array('data' => t('Titel'), 'field' => 'title'),
+		array('data' => t('Aangemaakt op'), 'field' => 'created', 'sort' => 'desc'),
+		array('data' => t('Gepubliceerd'), 'field' => 'status'),
+		//array('data' => t('Dupliceer')), // on click create new vacancie based on this one.
+	);
+	if( user_access('manage all vacancies') ) {
+		$header[] = array('data' => t('User'), 'field' => 'name');
+	}
+	
+	// query db for user nodes
+	$query = db_select('node','n');
+	$query->fields('n', array('nid','title','created','status','uid'));
+	
+	if( user_access('manage all vacancies') != TRUE ) {
+		$query->condition('n.uid', $user->uid);
+	} else {
+		$query->join('users', 'u', 'u.uid = n.uid');
+		$query->fields('u',array('name') );
+	}
+	
+	$query->condition('type', 'vacature');
+	// extend $query with page method(s)
+	$query = $query->extend('PagerDefault')->limit(25);
+	// extend $query with tablesort methods and sort on (clicked) header
+	$query = $query->extend('TableSort')->orderByHeader($header);
+	
+	$results = $query->execute();
+	
+	// display nodes ( like click view )
+	$rows = array();
+	
+	foreach($results as $vacancy) {
+		$datarow = NULL;
+		$datarow = array(
+			'data' => array(
+				$vacancy->title,
+				format_date($vacancy->created),
+				l( ( $vacancy->status == 1? t('Ja') : t('Nee') ), 
+					'vacancies_manage/status_callback/' . $vacancy->nid . '/' . ( $vacancy->status == 1 ? "0" : "1" ), 
+					array('attributes' => array('class' => 'vacancies_manage_pubdate') ) 
+				),
+				//dupliceer
+			),
+		);
+		if( user_access('manage all vacancies') ) {
+			$datarow['data'][] = $vacancy->name; // name werkt niet???
+		}
+		$rows[] = $datarow;
+	}
+	
+	//Theme the html table
+	$html = theme('table',
+		array(
+			'header' => $header,
+			'rows' => $rows,
+			'caption' => '<a href="/node/add/vacature">Nieuwe vacature plaatsen</a>',
+			'sticky' => TRUE, // Optional to indicate whether the table headers should be sticky 
+			'empty' => 'U heeft geen vacatures.', // Optional when no results
+		)
+	);
+	
+	$html .= theme('pager',
+		array(
+			'tags' => array(),
+		)
+	);
+	// TODO add publish / depublish buttons
+	// TODO add dupliceer button9
+	// TODO create pager
+	die($html);
+}

@@ -1,0 +1,7 @@
+name = Vacancies Manage
+description = Lets user manage their own vacancies.
+package = jbbi
+core = 7.x
+
+files[] = vacancies_manage.module
+version = 7.x-0.1
